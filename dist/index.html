@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,68 +8,69 @@
   </head>
   <body>
     <main>
-      <h1>本地代理</h1>
-      <p class="sub">本地免密代理 → 远端需认证的 HTTP 代理</p>
+      <h1>Local Proxy</h1>
+      <p class="sub">Local no-auth proxy → remote authenticated HTTP proxy</p>
 
       <section class="card">
-        <label for="bind">本地监听地址</label>
+        <label for="bind">Local listen address</label>
         <input id="bind" value="127.0.0.1:8899" spellcheck="false" />
 
         <dl class="info">
-          <dt>上游代理</dt>
-          <dd id="upstream">未加载</dd>
-          <dt>上游用户</dt>
+          <dt>Upstream proxy</dt>
+          <dd id="upstream">Not loaded</dd>
+          <dt>Upstream user</dt>
           <dd id="user">-</dd>
-          <dt>凭据文件</dt>
+          <dt>Credentials file</dt>
           <dd id="keypath">-</dd>
         </dl>
 
         <details id="editor">
-          <summary>编辑上游凭据</summary>
+          <summary>Edit upstream credentials</summary>
           <div class="grid">
-            <label for="up-ip">地址</label>
+            <label for="up-ip">Address</label>
             <input id="up-ip" placeholder="203.0.113.10" spellcheck="false" autocomplete="off" />
-            <label for="up-port">端口</label>
+            <label for="up-port">Port</label>
             <input id="up-port" type="number" min="1" max="65535" placeholder="808" />
-            <label for="up-user">用户名</label>
+            <label for="up-user">Username</label>
             <input id="up-user" spellcheck="false" autocomplete="off" />
-            <label for="up-pass">密码</label>
+            <label for="up-pass">Password</label>
             <input id="up-pass" type="password" autocomplete="off" />
           </div>
-          <button id="save">保存到本机配置目录</button>
-          <p class="hint">保存位置：<span id="cfgpath" class="mono">-</span>（权限 0600，仅当前用户可读）</p>
+          <button id="save">Save to local config directory</button>
+          <p class="hint">Saved to: <span id="cfgpath" class="mono">-</span> (mode 0600, readable only by you)</p>
         </details>
 
         <div class="row">
-          <button id="toggle" class="primary">启动</button>
-          <button id="reload">重新读取 .key</button>
-          <span id="state" class="badge off" role="status" aria-live="polite">已停止</span>
+          <button id="toggle" class="primary">Start</button>
+          <button id="reload">Reload .key</button>
+          <span id="state" class="badge off" role="status" aria-live="polite">Stopped</span>
         </div>
         <p id="error" class="error" role="alert"></p>
       </section>
 
       <section class="card">
         <div class="row space">
-          <h2>系统代理</h2>
-          <span id="sys-state" class="badge off" role="status" aria-live="polite">未使用</span>
+          <h2>System proxy</h2>
+          <span id="sys-state" class="badge off" role="status" aria-live="polite">Off</span>
         </div>
         <p class="hint">
-          勾选需要走代理的网络服务，macOS 的 HTTPS 代理会指向本地监听地址，未勾选的保持原样。
-          不会改动你已有的 HTTP 代理和绕过列表。停止本地代理或退出应用时会自动恢复直连。
+          Tick the network services that should use the proxy. macOS's HTTPS proxy will point at the
+          local listener; unticked services are left alone. Your existing HTTP proxy and bypass list
+          are not modified. Stopping the local proxy or quitting the app restores a direct connection.
         </p>
-        <ul id="sys-list" class="services" aria-label="网络服务"></ul>
+        <ul id="sys-list" class="services" aria-label="Network services"></ul>
         <div class="row">
-          <button id="sys-on">应用到所选服务</button>
-          <button id="sys-off">恢复直连</button>
+          <button id="sys-on">Apply to selected</button>
+          <button id="sys-off">Restore direct</button>
         </div>
       </section>
 
       <section class="card">
         <div class="row space">
-          <h2>连接 <span id="counts" class="mono">0 活跃 / 0 累计 / 0 失败</span></h2>
-          <button id="clear">清空日志</button>
+          <h2>Connections <span id="counts" class="mono">0 active / 0 total / 0 failed</span></h2>
+          <button id="clear">Clear log</button>
         </div>
-        <pre id="logs" class="logs" aria-label="运行日志"></pre>
+        <pre id="logs" class="logs" aria-label="Runtime log"></pre>
       </section>
     </main>
     <script type="module" src="main.js"></script>

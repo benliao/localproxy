@@ -84,10 +84,10 @@ fn save_config(
 ) -> Result<serde_json::Value, String> {
     let ip = ip.trim().to_string();
     if ip.is_empty() {
-        return Err("上游地址不能为空".into());
+        return Err("upstream address must not be empty".into());
     }
     if port == 0 {
-        return Err("端口无效".into());
+        return Err("invalid port".into());
     }
     let up = Upstream {
         ip,
@@ -112,7 +112,7 @@ async fn start_proxy(
 ) -> Result<Status, String> {
     let mut guard = state.running.lock().await;
     if guard.is_some() {
-        return Err("代理已在运行".into());
+        return Err("proxy is already running".into());
     }
 
     let (upstream, key_file) =
@@ -120,7 +120,7 @@ async fn start_proxy(
     let bind_str = bind.unwrap_or_else(|| DEFAULT_BIND.to_string());
     let bind_addr: SocketAddr = bind_str
         .parse()
-        .map_err(|_| format!("本地监听地址无效: {bind_str}"))?;
+        .map_err(|_| format!("invalid local listen address: {bind_str}"))?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let logs = Arc::clone(&state.logs);
@@ -140,7 +140,7 @@ async fn start_proxy(
     push_log(
         &state.logs,
         format!(
-            "本地代理已启动 {} -> 上游 {}",
+            "local proxy started {} -> upstream {}",
             meta.local_addr, meta.upstream
         ),
     );
@@ -157,9 +157,9 @@ async fn stop_proxy(state: State<'_, AppState>) -> Result<Status, String> {
         match guard.take() {
             Some(r) => {
                 r.handle.abort();
-                push_log(&state.logs, "本地代理已停止".into());
+                push_log(&state.logs, "local proxy stopped".into());
             }
-            None => return Err("代理未在运行".into()),
+            None => return Err("proxy is not running".into()),
         }
     }
     // The listener is gone; leaving a service pointed at it would break that
@@ -172,9 +172,9 @@ async fn stop_proxy(state: State<'_, AppState>) -> Result<Status, String> {
         match sysproxy::clear_proxy(&owned) {
             Ok(changed) => push_log(
                 &state.logs,
-                format!("已同时关闭系统代理: {}", changed.join(", ")),
+                format!("system proxy also turned off: {}", changed.join(", ")),
             ),
-            Err(e) => push_log(&state.logs, format!("关闭系统代理失败: {e}")),
+            Err(e) => push_log(&state.logs, format!("failed to turn off system proxy: {e}")),
         }
     }
     status(state).await
@@ -247,7 +247,7 @@ async fn set_system_proxy(
         let guard = state.running.lock().await;
         match guard.as_ref() {
             Some(r) => r.addr,
-            None => return Err("请先启动本地代理，再设置系统代理".into()),
+            None => return Err("start the local proxy before setting the system proxy".into()),
         }
     };
     let changed = sysproxy::set_proxy(&listen.ip().to_string(), listen.port(), &services)?;
@@ -261,7 +261,10 @@ async fn set_system_proxy(
     }
     push_log(
         &state.logs,
-        format!("系统代理已指向 {listen}: {}", changed.join(", ")),
+        format!(
+            "system proxy now points at {listen}: {}",
+            changed.join(", ")
+        ),
     );
     Ok(changed)
 }
@@ -282,7 +285,7 @@ async fn clear_system_proxy(
             .clone(),
     };
     if targets.is_empty() {
-        return Err("当前没有由本应用设置的系统代理".into());
+        return Err("this app has not set any system proxy".into());
     }
     let changed = sysproxy::clear_proxy(&targets)?;
     {
@@ -291,7 +294,7 @@ async fn clear_system_proxy(
     }
     push_log(
         &state.logs,
-        format!("系统代理已关闭: {}", changed.join(", ")),
+        format!("system proxy turned off: {}", changed.join(", ")),
     );
     Ok(changed)
 }
@@ -337,7 +340,9 @@ pub fn run() {
 /// Headless entry point: `localproxy --cli [bind] [key_path]`, useful for testing.
 pub async fn run_cli(bind: &str, key_path: Option<&str>) -> Result<(), String> {
     let (upstream, key_file) = config::load_upstream(key_path.map(std::path::Path::new))?;
-    let addr: SocketAddr = bind.parse().map_err(|_| format!("地址无效: {bind}"))?;
+    let addr: SocketAddr = bind
+        .parse()
+        .map_err(|_| format!("invalid address: {bind}"))?;
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         while let Some(l) = rx.recv().await {

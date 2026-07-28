@@ -42,7 +42,7 @@ pub fn parse_key_file(contents: &str) -> Result<Upstream, String> {
         }
         let (key, value) = line
             .split_once('=')
-            .ok_or_else(|| format!("第 {} 行缺少 '='", idx + 1))?;
+            .ok_or_else(|| format!("line {} is missing '='", idx + 1))?;
         let value = value.trim().to_string();
         match key.trim().to_ascii_lowercase().as_str() {
             "ip" | "host" | "server" => ip = Some(value),
@@ -61,9 +61,9 @@ fn build(
     user: Option<String>,
     password: Option<String>,
 ) -> Result<Upstream, String> {
-    let ip = ip.filter(|v| !v.is_empty()).ok_or("缺少 ip")?;
-    let port = port.filter(|v| !v.is_empty()).ok_or("缺少 port")?;
-    let port: u16 = port.parse().map_err(|_| format!("port 无效: {port}"))?;
+    let ip = ip.filter(|v| !v.is_empty()).ok_or("missing ip")?;
+    let port = port.filter(|v| !v.is_empty()).ok_or("missing port")?;
+    let port: u16 = port.parse().map_err(|_| format!("invalid port: {port}"))?;
     Ok(Upstream {
         ip,
         port,
@@ -142,19 +142,20 @@ pub fn find_key_file() -> Option<PathBuf> {
 /// Write credentials to the per-user config dir with owner-only permissions.
 pub fn save_upstream(up: &Upstream) -> Result<PathBuf, String> {
     let dir = config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     let path = dir.join(KEY_FILE);
     let body = format!(
         "ip={}\nport={}\nuser={}\npassword={}\n",
         up.ip, up.port, up.user, up.password
     );
-    std::fs::write(&path, body).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    std::fs::write(&path, body).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         // 0600: credentials must not be readable by other local users.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("设置权限失败: {e}"))?;
+            .map_err(|e| format!("failed to set permissions: {e}"))?;
     }
     Ok(path)
 }
@@ -164,15 +165,15 @@ pub fn load_upstream(path: Option<&Path>) -> Result<(Upstream, PathBuf), String>
         Some(p) => p.to_path_buf(),
         None => find_key_file().ok_or_else(|| {
             format!(
-                "找不到 .key，请在界面中填写上游代理信息，或手动创建 {}",
+                ".key not found. Enter the upstream proxy details in the app, or create {} manually",
                 config_dir().join(KEY_FILE).display()
             )
         })?,
     };
-    let contents =
-        std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
-    let upstream =
-        parse_key_file(&contents).map_err(|e| format!("{} 解析失败: {e}", path.display()))?;
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let upstream = parse_key_file(&contents)
+        .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
     Ok((upstream, path))
 }
 

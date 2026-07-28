@@ -4,7 +4,7 @@ const el = (id) => document.getElementById(id);
 const bridge = window.__TAURI__?.core?.invoke;
 if (!bridge) {
   el("error").textContent =
-    "未检测到 Tauri 接口（window.__TAURI__）。请通过应用本身运行，而不是在普通浏览器里打开 dist/index.html。";
+    "Tauri bridge (window.__TAURI__) not found. Run this through the app itself, not by opening dist/index.html in a plain browser.";
   throw new Error("Tauri bridge unavailable");
 }
 const invoke = bridge;
@@ -47,7 +47,7 @@ function showOk(msg) {
 
 function applyConfig(c) {
   ui.upstream.textContent = c.upstream;
-  ui.user.textContent = c.has_password ? `${c.user} (已配置密码)` : c.user || "-";
+  ui.user.textContent = c.has_password ? `${c.user} (password set)` : c.user || "-";
   ui.keypath.textContent = c.key_path;
   const [ip, port] = c.upstream.split(":");
   ui.ip.value = ip;
@@ -57,16 +57,16 @@ function applyConfig(c) {
 
 function render(status) {
   running = status.running;
-  ui.state.textContent = running ? "运行中" : "已停止";
+  ui.state.textContent = running ? "Running" : "Stopped";
   ui.state.className = `badge ${running ? "on" : "off"}`;
-  ui.toggle.textContent = running ? "停止" : "启动";
+  ui.toggle.textContent = running ? "Stop" : "Start";
   ui.toggle.classList.toggle("stop", running);
   ui.bind.disabled = running;
   if (status.upstream) ui.upstream.textContent = status.upstream;
   if (status.upstream_user) ui.user.textContent = status.upstream_user;
   if (status.key_path) ui.keypath.textContent = status.key_path;
   if (running && status.local_addr) ui.bind.value = status.local_addr;
-  ui.counts.textContent = `${status.active} 活跃 / ${status.total} 累计 / ${status.failed} 失败`;
+  ui.counts.textContent = `${status.active} active / ${status.total} total / ${status.failed} failed`;
 }
 
 async function loadConfig() {
@@ -94,7 +94,7 @@ ui.save.addEventListener("click", async () => {
     );
     ui.pass.value = "";
     ui.editor.open = false;
-    showOk("已保存，可以启动了");
+    showOk("Saved. Ready to start.");
   } catch (e) {
     showError(e);
   }
@@ -121,7 +121,7 @@ let selectionSeeded = false;
 
 function renderSystemProxy(services) {
   const on = services.filter((s) => s.https_enabled);
-  ui.sysState.textContent = on.length ? `已启用 (${on.length})` : "未使用";
+  ui.sysState.textContent = on.length ? `On (${on.length})` : "Off";
   ui.sysState.className = `badge ${on.length ? "on" : "off"}`;
   // First load: tick whatever is already proxied, else the primary service
   // (macOS lists services in priority order).
@@ -145,7 +145,7 @@ function serviceRow(s) {
     else selected.delete(s.service);
   });
   const text = document.createElement("span");
-  text.textContent = `${s.service} — ${s.https_enabled ? `${s.server}:${s.port}` : "直连"}`;
+  text.textContent = `${s.service} — ${s.https_enabled ? `${s.server}:${s.port}` : "direct"}`;
   label.append(box, text);
   li.append(label);
   return li;
@@ -164,7 +164,7 @@ async function systemProxy(cmd, okMsg, services) {
   ui.sysOn.disabled = ui.sysOff.disabled = true;
   try {
     const changed = await invoke(cmd, { services });
-    showOk(`${okMsg}${changed.length ? "：" + changed.join("、") : ""}`);
+    showOk(`${okMsg}${changed.length ? ": " + changed.join(", ") : ""}`);
     await refreshSystemProxy();
   } catch (e) {
     showError(e);
@@ -174,11 +174,11 @@ async function systemProxy(cmd, okMsg, services) {
 }
 
 ui.sysOn.addEventListener("click", () =>
-  systemProxy("set_system_proxy", "系统代理已开启", [...selected])
+  systemProxy("set_system_proxy", "System proxy enabled", [...selected])
 );
 // Restoring falls back to "whatever this app turned on" when nothing is ticked.
 ui.sysOff.addEventListener("click", () =>
-  systemProxy("clear_system_proxy", "已恢复直连", selected.size ? [...selected] : null)
+  systemProxy("clear_system_proxy", "Restored direct connection", selected.size ? [...selected] : null)
 );
 
 ui.reload.addEventListener("click", loadConfig);

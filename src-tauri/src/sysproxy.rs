@@ -23,7 +23,7 @@ fn networksetup(args: &[&str]) -> Result<String, String> {
     let out = Command::new("/usr/sbin/networksetup")
         .args(args)
         .output()
-        .map_err(|e| format!("执行 networksetup 失败: {e}"))?;
+        .map_err(|e| format!("failed to run networksetup: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -33,7 +33,7 @@ fn networksetup(args: &[&str]) -> Result<String, String> {
             stderr.trim().to_string()
         };
         return Err(format!(
-            "networksetup {:?} 失败: {msg}",
+            "networksetup {:?} failed: {msg}",
             args.first().unwrap_or(&"")
         ));
     }
@@ -46,7 +46,7 @@ fn networksetup(args: &[&str]) -> Result<String, String> {
 
 #[cfg(not(target_os = "macos"))]
 fn networksetup(_args: &[&str]) -> Result<String, String> {
-    Err("系统代理设置目前仅支持 macOS".into())
+    Err("system proxy configuration is only supported on macOS".into())
 }
 
 /// Parse the `Enabled/Server/Port` block that `-getsecurewebproxy` prints.
@@ -114,7 +114,7 @@ fn has_bypass_domains(service: &str) -> bool {
 /// Returns the services actually changed.
 pub fn set_proxy(host: &str, port: u16, services: &[String]) -> Result<Vec<String>, String> {
     if services.is_empty() {
-        return Err("请先选择要代理的网络服务".into());
+        return Err("select at least one network service to proxy".into());
     }
     // Only act on services macOS actually reports, so a stale or crafted name
     // from the frontend can't be handed to networksetup.
@@ -124,7 +124,7 @@ pub fn set_proxy(host: &str, port: u16, services: &[String]) -> Result<Vec<Strin
     let mut errors = Vec::new();
     for service in services {
         if !known.contains(service) {
-            errors.push(format!("{service}: 不是当前可用的网络服务"));
+            errors.push(format!("{service}: not an active network service"));
             continue;
         }
         // Only the secure (HTTPS) proxy is touched. A service may already hold
@@ -195,7 +195,7 @@ mod tests {
     fn set_proxy_requires_a_selection() {
         // Empty selection must not fall back to "all services".
         let err = set_proxy("127.0.0.1", 8899, &[]).unwrap_err();
-        assert!(err.contains("请先选择"), "{err}");
+        assert!(err.contains("select at least one"), "{err}");
     }
 
     #[test]

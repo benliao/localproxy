@@ -39,7 +39,7 @@ pub async fn spawn(
 ) -> Result<RunningProxy, String> {
     let listener = TcpListener::bind(bind)
         .await
-        .map_err(|e| format!("绑定 {bind} 失败: {e}"))?;
+        .map_err(|e| format!("failed to bind {bind}: {e}"))?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
     let counters = Counters::default();
     let upstream = Arc::new(upstream);
@@ -57,13 +57,13 @@ pub async fn spawn(
                         counters.total.fetch_add(1, Ordering::Relaxed);
                         if let Err(e) = handle_client(stream, peer, &upstream, &logs).await {
                             counters.failed.fetch_add(1, Ordering::Relaxed);
-                            log(&logs, format!("[{peer}] 错误: {e}"));
+                            log(&logs, format!("[{peer}] error: {e}"));
                         }
                         counters.active.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
                 Err(e) => {
-                    log(&logs, format!("accept 失败: {e}"));
+                    log(&logs, format!("accept failed: {e}"));
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             }
@@ -86,9 +86,9 @@ async fn read_head(stream: &mut TcpStream) -> Result<(String, Vec<u8>), String> 
         let n = stream
             .read(&mut chunk)
             .await
-            .map_err(|e| format!("读取请求失败: {e}"))?;
+            .map_err(|e| format!("failed to read request: {e}"))?;
         if n == 0 {
-            return Err("客户端在发送请求头前断开".into());
+            return Err("client disconnected before sending request headers".into());
         }
         buf.extend_from_slice(&chunk[..n]);
         if let Some(pos) = find_head_end(&buf) {
@@ -97,7 +97,7 @@ async fn read_head(stream: &mut TcpStream) -> Result<(String, Vec<u8>), String> 
             return Ok((head, leftover));
         }
         if buf.len() > MAX_HEAD {
-            return Err("请求头过大".into());
+            return Err("request headers too large".into());
         }
     }
 }
@@ -111,7 +111,7 @@ fn rewrite_head(head: &str, upstream: &Upstream) -> Result<(String, String), Str
     let mut lines = head.split("\r\n");
     let request_line = lines.next().unwrap_or_default().to_string();
     if request_line.is_empty() {
-        return Err("空请求行".into());
+        return Err("empty request line".into());
     }
     let mut out = String::with_capacity(head.len() + 96);
     out.push_str(&request_line);
@@ -154,20 +154,20 @@ async fn handle_client(
     let target = upstream.addr();
     let mut server = tokio::time::timeout(UPSTREAM_TIMEOUT, TcpStream::connect(&target))
         .await
-        .map_err(|_| format!("连接上游 {target} 超时"))?
-        .map_err(|e| format!("连接上游 {target} 失败: {e}"))?;
+        .map_err(|_| format!("timed out connecting to upstream {target}"))?
+        .map_err(|e| format!("failed to connect to upstream {target}: {e}"))?;
     let _ = client.set_nodelay(true);
     let _ = server.set_nodelay(true);
 
     server
         .write_all(rewritten.as_bytes())
         .await
-        .map_err(|e| format!("发送请求头到上游失败: {e}"))?;
+        .map_err(|e| format!("failed to send request headers upstream: {e}"))?;
     if !leftover.is_empty() {
         server
             .write_all(&leftover)
             .await
-            .map_err(|e| format!("转发请求体失败: {e}"))?;
+            .map_err(|e| format!("failed to forward request body: {e}"))?;
     }
     server.flush().await.ok();
 
@@ -180,8 +180,8 @@ async fn handle_client(
 
     let (up, down) = tokio::io::copy_bidirectional(&mut client, &mut server)
         .await
-        .map_err(|e| format!("隧道中断: {e}"))?;
-    log(logs, format!("[{peer}] 关闭 ↑{up}B ↓{down}B"));
+        .map_err(|e| format!("tunnel broken: {e}"))?;
+    log(logs, format!("[{peer}] closed ↑{up}B ↓{down}B"));
     Ok(())
 }
 
