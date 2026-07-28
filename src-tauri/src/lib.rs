@@ -1,5 +1,6 @@
 mod config;
 mod proxy;
+mod sysproxy;
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -10,6 +11,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 use tokio::sync::mpsc;
 
+use config::Upstream;
 use proxy::RunningProxy;
 
 const MAX_LOG_LINES: usize = 500;
@@ -28,6 +30,9 @@ pub struct AppState {
     running: tokio::sync::Mutex<Option<RunningProxy>>,
     meta: Mutex<Option<Meta>>,
     logs: Arc<Mutex<VecDeque<String>>>,
+    /// Services whose proxy setting we changed, so the app can put exactly
+    /// those back to direct connection when the proxy stops or it quits.
+    sys_proxy_owned: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Serialize)]
@@ -59,6 +64,42 @@ fn load_config(path: Option<String>) -> Result<serde_json::Value, String> {
         "upstream": up.addr(),
         "user": up.user,
         "key_path": p.display().to_string(),
+        "has_password": !up.password.is_empty(),
+    }))
+}
+
+/// Where a packaged app expects `.key` to live.
+#[tauri::command]
+fn config_location() -> String {
+    config::config_dir().join(".key").display().to_string()
+}
+
+/// Persist credentials entered in the UI to the per-user config dir.
+#[tauri::command]
+fn save_config(
+    ip: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    let ip = ip.trim().to_string();
+    if ip.is_empty() {
+        return Err("上游地址不能为空".into());
+    }
+    if port == 0 {
+        return Err("端口无效".into());
+    }
+    let up = Upstream {
+        ip,
+        port,
+        user: user.trim().to_string(),
+        password,
+    };
+    let path = config::save_upstream(&up)?;
+    Ok(serde_json::json!({
+        "upstream": up.addr(),
+        "user": up.user,
+        "key_path": path.display().to_string(),
         "has_password": !up.password.is_empty(),
     }))
 }
@@ -121,6 +162,21 @@ async fn stop_proxy(state: State<'_, AppState>) -> Result<Status, String> {
             None => return Err("代理未在运行".into()),
         }
     }
+    // The listener is gone; leaving a service pointed at it would break that
+    // service's traffic, so roll back only the ones we changed.
+    let owned = {
+        let mut g = state.sys_proxy_owned.lock().map_err(|e| e.to_string())?;
+        std::mem::take(&mut *g)
+    };
+    if !owned.is_empty() {
+        match sysproxy::clear_proxy(&owned) {
+            Ok(changed) => push_log(
+                &state.logs,
+                format!("已同时关闭系统代理: {}", changed.join(", ")),
+            ),
+            Err(e) => push_log(&state.logs, format!("关闭系统代理失败: {e}")),
+        }
+    }
     status(state).await
 }
 
@@ -160,6 +216,86 @@ fn clear_logs(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// Thin re-exports so the `sysproxy_e2e` example can drive the real code path.
+pub fn sysproxy_get() -> Result<Vec<sysproxy::ServiceProxy>, String> {
+    sysproxy::get_state()
+}
+pub fn sysproxy_set(host: &str, port: u16, services: &[String]) -> Result<Vec<String>, String> {
+    sysproxy::set_proxy(host, port, services)
+}
+pub fn sysproxy_clear(services: &[String]) -> Result<Vec<String>, String> {
+    sysproxy::clear_proxy(services)
+}
+pub fn sysproxy_services() -> Result<Vec<String>, String> {
+    sysproxy::active_services()
+}
+
+/// Current system proxy settings per active network service.
+#[tauri::command]
+fn system_proxy_state() -> Result<Vec<sysproxy::ServiceProxy>, String> {
+    sysproxy::get_state()
+}
+
+/// Route system HTTP/HTTPS traffic through the local listener.
+/// Refuses when the local proxy is down, since that would break all traffic.
+#[tauri::command]
+async fn set_system_proxy(
+    state: State<'_, AppState>,
+    services: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let listen = {
+        let guard = state.running.lock().await;
+        match guard.as_ref() {
+            Some(r) => r.addr,
+            None => return Err("请先启动本地代理，再设置系统代理".into()),
+        }
+    };
+    let changed = sysproxy::set_proxy(&listen.ip().to_string(), listen.port(), &services)?;
+    {
+        let mut owned = state.sys_proxy_owned.lock().map_err(|e| e.to_string())?;
+        for s in &changed {
+            if !owned.contains(s) {
+                owned.push(s.clone());
+            }
+        }
+    }
+    push_log(
+        &state.logs,
+        format!("系统代理已指向 {listen}: {}", changed.join(", ")),
+    );
+    Ok(changed)
+}
+
+/// Restore direct connection.
+#[tauri::command]
+async fn clear_system_proxy(
+    state: State<'_, AppState>,
+    services: Option<Vec<String>>,
+) -> Result<Vec<String>, String> {
+    // No explicit list means "undo whatever we turned on".
+    let targets = match services {
+        Some(s) if !s.is_empty() => s,
+        _ => state
+            .sys_proxy_owned
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone(),
+    };
+    if targets.is_empty() {
+        return Err("当前没有由本应用设置的系统代理".into());
+    }
+    let changed = sysproxy::clear_proxy(&targets)?;
+    {
+        let mut owned = state.sys_proxy_owned.lock().map_err(|e| e.to_string())?;
+        owned.retain(|s| !changed.contains(s));
+    }
+    push_log(
+        &state.logs,
+        format!("系统代理已关闭: {}", changed.join(", ")),
+    );
+    Ok(changed)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -167,13 +303,32 @@ pub fn run() {
             app.manage(AppState::default());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Leaving the system pointed at a dead listener would take the
+            // machine offline, so undo our own change on the way out.
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let state = window.state::<AppState>();
+                let owned = match state.sys_proxy_owned.lock() {
+                    Ok(mut g) => std::mem::take(&mut *g),
+                    Err(_) => Vec::new(),
+                };
+                if !owned.is_empty() {
+                    let _ = sysproxy::clear_proxy(&owned);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             load_config,
+            save_config,
+            config_location,
             start_proxy,
             stop_proxy,
             status,
             logs,
-            clear_logs
+            clear_logs,
+            system_proxy_state,
+            set_system_proxy,
+            clear_system_proxy
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

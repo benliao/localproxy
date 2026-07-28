@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+const KEY_FILE: &str = ".key";
+const APP_DIR: &str = "com.raroro.localproxy";
+
 /// Upstream proxy credentials, parsed from a `key=value` file (`.key`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Upstream {
@@ -69,30 +72,102 @@ fn build(
     })
 }
 
-/// Look for `.key` next to the executable, in the CWD, or walking up parent dirs.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+}
+
+/// Per-user config directory. This is where a packaged app keeps its `.key`,
+/// since the `.app` bundle itself is replaced on every update.
+pub fn config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("LOCALPROXY_CONFIG_DIR").map(PathBuf::from) {
+        return dir;
+    }
+    match home_dir() {
+        #[cfg(target_os = "macos")]
+        Some(h) => h.join("Library/Application Support").join(APP_DIR),
+        #[cfg(not(target_os = "macos"))]
+        Some(h) => std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| h.join(".config"))
+            .join(APP_DIR),
+        None => PathBuf::from(".").join(APP_DIR),
+    }
+}
+
+/// Resolve `.key` in priority order:
+/// 1. `LOCALPROXY_KEY` env var (explicit override)
+/// 2. the per-user config dir (where the packaged app stores it)
+/// 3. next to the executable / CWD, walking up but never past `$HOME`
+///
+/// The `$HOME` boundary matters: in a `.app` bundle the exe lives under
+/// `/Applications`, and walking to `/` would let anyone plant a `.key` in a
+/// shared directory that we would then read credentials from.
 pub fn find_key_file() -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        let mut dir = exe.parent().map(Path::to_path_buf);
-        while let Some(d) = dir {
-            candidates.push(d.join(".key"));
-            dir = d.parent().map(Path::to_path_buf);
+    if let Some(p) = std::env::var_os("LOCALPROXY_KEY").map(PathBuf::from) {
+        if p.is_file() {
+            return Some(p);
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = Some(cwd);
+    let in_config = config_dir().join(KEY_FILE);
+    if in_config.is_file() {
+        return Some(in_config);
+    }
+
+    let home = home_dir();
+    let starts = [
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(Path::to_path_buf)),
+        std::env::current_dir().ok(),
+    ];
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for start in starts.into_iter().flatten() {
+        let mut dir = Some(start);
         while let Some(d) = dir {
-            candidates.push(d.join(".key"));
+            // Only trust locations inside the user's own home directory.
+            if let Some(h) = home.as_ref() {
+                if !d.starts_with(h) {
+                    break;
+                }
+            }
+            candidates.push(d.join(KEY_FILE));
             dir = d.parent().map(Path::to_path_buf);
         }
     }
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Write credentials to the per-user config dir with owner-only permissions.
+pub fn save_upstream(up: &Upstream) -> Result<PathBuf, String> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    let path = dir.join(KEY_FILE);
+    let body = format!(
+        "ip={}\nport={}\nuser={}\npassword={}\n",
+        up.ip, up.port, up.user, up.password
+    );
+    std::fs::write(&path, body).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // 0600: credentials must not be readable by other local users.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("设置权限失败: {e}"))?;
+    }
+    Ok(path)
+}
+
 pub fn load_upstream(path: Option<&Path>) -> Result<(Upstream, PathBuf), String> {
     let path = match path {
         Some(p) => p.to_path_buf(),
-        None => find_key_file().ok_or("找不到 .key 文件")?,
+        None => find_key_file().ok_or_else(|| {
+            format!(
+                "找不到 .key，请在界面中填写上游代理信息，或手动创建 {}",
+                config_dir().join(KEY_FILE).display()
+            )
+        })?,
     };
     let contents =
         std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
@@ -121,6 +196,38 @@ mod tests {
         assert_eq!(up.ip, "h");
         assert_eq!(up.port, 1080);
         assert_eq!(up.user, "u");
+    }
+
+    #[test]
+    fn config_dir_honors_override() {
+        // Uses a process-wide env var, so keep it in one test.
+        let tmp = std::env::temp_dir().join("lp-cfg-test");
+        std::env::set_var("LOCALPROXY_CONFIG_DIR", &tmp);
+        assert_eq!(config_dir(), tmp);
+
+        let up = Upstream {
+            ip: "10.1.2.3".into(),
+            port: 8080,
+            user: "bob".into(),
+            password: "pw".into(),
+        };
+        let saved = save_upstream(&up).unwrap();
+        assert_eq!(saved, tmp.join(".key"));
+
+        let (round, _) = load_upstream(None).unwrap();
+        assert_eq!(round.ip, "10.1.2.3");
+        assert_eq!(round.port, 8080);
+        assert_eq!(round.password, "pw");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&saved).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "credentials must be owner-only");
+        }
+
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("LOCALPROXY_CONFIG_DIR");
     }
 
     #[test]

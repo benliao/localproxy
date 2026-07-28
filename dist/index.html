@@ -24,12 +24,44 @@
           <dd id="keypath">-</dd>
         </dl>
 
+        <details id="editor">
+          <summary>编辑上游凭据</summary>
+          <div class="grid">
+            <label for="up-ip">地址</label>
+            <input id="up-ip" placeholder="203.0.113.10" spellcheck="false" autocomplete="off" />
+            <label for="up-port">端口</label>
+            <input id="up-port" type="number" min="1" max="65535" placeholder="808" />
+            <label for="up-user">用户名</label>
+            <input id="up-user" spellcheck="false" autocomplete="off" />
+            <label for="up-pass">密码</label>
+            <input id="up-pass" type="password" autocomplete="off" />
+          </div>
+          <button id="save">保存到本机配置目录</button>
+          <p class="hint">保存位置：<span id="cfgpath" class="mono">-</span>（权限 0600，仅当前用户可读）</p>
+        </details>
+
         <div class="row">
           <button id="toggle" class="primary">启动</button>
           <button id="reload">重新读取 .key</button>
           <span id="state" class="badge off" role="status" aria-live="polite">已停止</span>
         </div>
         <p id="error" class="error" role="alert"></p>
+      </section>
+
+      <section class="card">
+        <div class="row space">
+          <h2>系统代理</h2>
+          <span id="sys-state" class="badge off" role="status" aria-live="polite">未使用</span>
+        </div>
+        <p class="hint">
+          勾选需要走代理的网络服务，macOS 的 HTTPS 代理会指向本地监听地址，未勾选的保持原样。
+          不会改动你已有的 HTTP 代理和绕过列表。停止本地代理或退出应用时会自动恢复直连。
+        </p>
+        <ul id="sys-list" class="services" aria-label="网络服务"></ul>
+        <div class="row">
+          <button id="sys-on">应用到所选服务</button>
+          <button id="sys-off">恢复直连</button>
+        </div>
       </section>
 
       <section class="card">
