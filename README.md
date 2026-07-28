@@ -11,8 +11,8 @@ HTTPS 通过标准 `CONNECT` 隧道透传，TLS 端到端加密，本程序不�
 放在项目根目录（或可执行文件的任一上级目录），`key=value` 每行一对：
 
 ```
-ip=203.0.113.10
-port=808
+ip=your-proxy-ip
+port=your-proxy-port
 user=your-user
 password=your-password
 ```
