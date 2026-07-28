@@ -55,13 +55,30 @@
         </div>
         <p class="hint">
           Tick the network services that should use the proxy. macOS's HTTPS proxy will point at the
-          local listener; unticked services are left alone. Your existing HTTP proxy and bypass list
-          are not modified. Stopping the local proxy or quitting the app restores a direct connection.
+          local listener; unticked services are left alone. Your existing HTTP proxy is not modified.
+          Stopping the local proxy or quitting the app restores a direct connection and your previous
+          bypass list.
         </p>
         <ul id="sys-list" class="services" aria-label="Network services"></ul>
+        <label class="field" for="bypass">Bypass list (direct, no proxy)</label>
+        <textarea
+          id="bypass"
+          class="mono"
+          rows="4"
+          spellcheck="false"
+          autocomplete="off"
+          aria-describedby="bypass-hint"
+          placeholder="localhost&#10;127.0.0.1&#10;*.local"
+        ></textarea>
+        <p class="hint" id="bypass-hint">
+          One host, domain or CIDR range per line, such as <span class="mono">*.internal.example</span>
+          or <span class="mono">192.168.0.0/16</span>. Applied to the ticked services when you turn the
+          system proxy on.
+        </p>
         <div class="row">
           <button id="sys-on">Apply to selected</button>
           <button id="sys-off">Restore direct</button>
+          <button id="bypass-save">Save bypass list</button>
         </div>
       </section>
 

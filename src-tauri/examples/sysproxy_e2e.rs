@@ -3,6 +3,7 @@
 //!   sysproxy_e2e                 -> print current state
 //!   sysproxy_e2e on  "Wi-Fi"     -> proxy only the named services
 //!   sysproxy_e2e off "Wi-Fi"     -> restore only the named services
+//! "on" applies the configured bypass list, same as the app does.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mode, services) = match args.split_first() {
@@ -13,7 +14,10 @@ fn main() {
         }
     };
     let r = match mode {
-        "on" => localproxy_lib::sysproxy_set("127.0.0.1", 8899, &services),
+        "on" => {
+            let bypass = localproxy_lib::sysproxy_default_bypass();
+            localproxy_lib::sysproxy_set("127.0.0.1", 8899, &services, &bypass)
+        }
         "off" => localproxy_lib::sysproxy_clear(&services),
         "list" => localproxy_lib::sysproxy_services(),
         other => Err(format!("unknown mode {other}")),

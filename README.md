@@ -41,6 +41,10 @@ npm run cli                                        # 127.0.0.1:8899, auto-discov
 ./src-tauri/target/debug/localproxy --cli 127.0.0.1:8899 /path/to/.key
 ```
 
+On `SIGINT` (Ctrl+C) or `SIGTERM`, headless mode checks which network services still point their
+HTTPS proxy at its own listener and switches those back to a direct connection before exiting, so a
+stopped proxy never leaves the machine pointed at a dead port.
+
 ## Client configuration
 
 ```bash
@@ -53,9 +57,17 @@ curl -x http://127.0.0.1:8899 https://example.com/
 
 The System proxy card lists your network services (Wi-Fi, Ethernet, ...). Tick the ones that should
 route through the local listener and hit Apply to selected. Only the **HTTPS** proxy is touched via
-`networksetup -setsecurewebproxy`; your existing HTTP proxy entry and bypass list are left as they
-are. Stopping the local proxy or quitting the app restores a direct connection on every service this
-app changed.
+`networksetup -setsecurewebproxy`; your existing HTTP proxy entry is left as it is. Stopping the
+local proxy or quitting the app restores a direct connection on every service this app changed.
+
+### Bypass list
+
+Hosts in the bypass list keep a direct connection while the system proxy is on. Put one entry per
+line (`localhost`, `*.internal.example`, `192.168.0.0/16`); it is applied to the ticked services via
+`networksetup -setproxybypassdomains`. Save bypass list persists it to the config directory
+(`bypass.txt`) so it is reused next time. Each service's previous bypass list is captured before the
+first change and restored when the proxy is turned off. Entries starting with `-`, containing
+whitespace, or equal to macOS's reserved `Empty` sentinel are rejected.
 
 Note that `curl` does not read the macOS system proxy settings. To verify, use something that does,
 for example Python's `urllib` (which honors `getproxies()`), or a browser.

@@ -29,6 +29,8 @@ const ui = {
   cfgpath: el("cfgpath"),
   sysOn: el("sys-on"),
   sysOff: el("sys-off"),
+  bypass: el("bypass"),
+  bypassSave: el("bypass-save"),
   sysState: el("sys-state"),
   sysList: el("sys-list"),
 };
@@ -159,11 +161,42 @@ async function refreshSystemProxy() {
   }
 }
 
-async function systemProxy(cmd, okMsg, services) {
+// Textarea lines -> argument list. Blank lines are dropped by the backend too,
+// so an empty box legitimately means "no bypass entries".
+function bypassEntries() {
+  return ui.bypass.value
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+async function loadBypass() {
+  try {
+    ui.bypass.value = (await invoke("load_bypass_list")).join("\n");
+  } catch (e) {
+    showError(e);
+  }
+}
+
+ui.bypassSave.addEventListener("click", async () => {
+  showError("");
+  ui.bypassSave.disabled = true;
+  try {
+    const clean = await invoke("save_bypass_list", { entries: bypassEntries() });
+    ui.bypass.value = clean.join("\n");
+    showOk(clean.length ? `Bypass list saved: ${clean.length} entries` : "Bypass list cleared");
+  } catch (e) {
+    showError(e);
+  } finally {
+    ui.bypassSave.disabled = false;
+  }
+});
+
+async function systemProxy(cmd, okMsg, services, extra = {}) {
   showError("");
   ui.sysOn.disabled = ui.sysOff.disabled = true;
   try {
-    const changed = await invoke(cmd, { services });
+    const changed = await invoke(cmd, { services, ...extra });
     showOk(`${okMsg}${changed.length ? ": " + changed.join(", ") : ""}`);
     await refreshSystemProxy();
   } catch (e) {
@@ -174,7 +207,9 @@ async function systemProxy(cmd, okMsg, services) {
 }
 
 ui.sysOn.addEventListener("click", () =>
-  systemProxy("set_system_proxy", "System proxy enabled", [...selected])
+  systemProxy("set_system_proxy", "System proxy enabled", [...selected], {
+    bypass: bypassEntries(),
+  })
 );
 // Restoring falls back to "whatever this app turned on" when nothing is ticked.
 ui.sysOff.addEventListener("click", () =>
@@ -202,6 +237,7 @@ async function poll() {
 await loadConfig();
 await poll();
 await refreshSystemProxy();
+await loadBypass();
 setInterval(poll, 1000);
 // Cheaper cadence: each refresh shells out to networksetup per service.
 setInterval(refreshSystemProxy, 5000);

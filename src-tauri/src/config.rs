@@ -2,7 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const KEY_FILE: &str = ".key";
+const BYPASS_FILE: &str = "bypass.txt";
 const APP_DIR: &str = "com.raroro.localproxy";
+
+/// Hosts that should never go through the proxy. Loopback and `.local` are
+/// included because sending them upstream breaks local development and mDNS.
+pub const DEFAULT_BYPASS: [&str; 3] = ["127.0.0.1", "localhost", "*.local"];
 
 /// Upstream proxy credentials, parsed from a `key=value` file (`.key`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,6 +165,62 @@ pub fn save_upstream(up: &Upstream) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Validate and normalize a bypass list coming from the UI or a file.
+///
+/// Entries are handed to `networksetup` as separate argv items, so the risk is
+/// not shell injection but an entry being read as a flag. Rejecting a leading
+/// `-` and any internal whitespace keeps each entry a single, inert operand.
+pub fn sanitize_bypass(entries: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in entries {
+        let e = raw.trim();
+        if e.is_empty() || e.starts_with('#') {
+            continue;
+        }
+        if e.starts_with('-') {
+            return Err(format!("bypass entry must not start with '-': {e}"));
+        }
+        if e.split_whitespace().count() > 1 {
+            return Err(format!("bypass entry must not contain spaces: {e}"));
+        }
+        // "Empty" is networksetup's sentinel for clearing the list; a literal
+        // entry would silently wipe everything instead of being added.
+        if e.eq_ignore_ascii_case("empty") {
+            return Err("\"Empty\" is reserved by macOS; remove all entries instead".into());
+        }
+        if !out.iter().any(|k| k == e) {
+            out.push(e.to_string());
+        }
+    }
+    Ok(out)
+}
+
+/// Bypass list from the per-user config dir, falling back to the defaults when
+/// the file is absent. A file that exists but is empty means "no bypass".
+pub fn load_bypass() -> Vec<String> {
+    let path = config_dir().join(BYPASS_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(body) => {
+            let lines: Vec<String> = body.lines().map(str::to_string).collect();
+            sanitize_bypass(&lines).unwrap_or_default()
+        }
+        Err(_) => DEFAULT_BYPASS.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// Persist the bypass list, one entry per line.
+pub fn save_bypass(entries: &[String]) -> Result<(Vec<String>, PathBuf), String> {
+    let clean = sanitize_bypass(entries)?;
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
+    let path = dir.join(BYPASS_FILE);
+    let mut body = clean.join("\n");
+    body.push('\n');
+    std::fs::write(&path, body).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    Ok((clean, path))
+}
+
 pub fn load_upstream(path: Option<&Path>) -> Result<(Upstream, PathBuf), String> {
     let path = match path {
         Some(p) => p.to_path_buf(),
@@ -229,6 +290,28 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("LOCALPROXY_CONFIG_DIR");
+    }
+
+    #[test]
+    fn sanitize_bypass_trims_dedups_and_drops_comments() {
+        let got = sanitize_bypass(&[
+            " *.corp.example ".into(),
+            "".into(),
+            "# a comment".into(),
+            "localhost".into(),
+            "localhost".into(),
+        ])
+        .unwrap();
+        assert_eq!(got, vec!["*.corp.example", "localhost"]);
+    }
+
+    #[test]
+    fn sanitize_bypass_rejects_unsafe_entries() {
+        // A leading '-' would be read as a networksetup flag.
+        assert!(sanitize_bypass(&["-setwebproxy".into()]).is_err());
+        assert!(sanitize_bypass(&["a.com b.com".into()]).is_err());
+        // macOS treats "Empty" as "clear the whole list".
+        assert!(sanitize_bypass(&["Empty".into()]).is_err());
     }
 
     #[test]
