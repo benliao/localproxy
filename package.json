@@ -1,0 +1,12 @@
+{
+  "name": "localproxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local no-auth HTTP/HTTPS proxy forwarding to an authenticated upstream proxy",
+  "scripts": {
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "cli": "cargo run --manifest-path src-tauri/Cargo.toml -- --cli 127.0.0.1:8899"
+  }
+}

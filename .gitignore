@@ -1,0 +1,10 @@
+# Secrets: upstream proxy credentials
+.key
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# macOS
+.DS_Store
+.agent/
