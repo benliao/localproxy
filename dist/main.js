@@ -1,6 +1,13 @@
-const invoke = window.__TAURI__.core.invoke;
-
 const el = (id) => document.getElementById(id);
+
+// Fail loudly in the UI: without the Tauri bridge nothing else can work.
+const bridge = window.__TAURI__?.core?.invoke;
+if (!bridge) {
+  el("error").textContent =
+    "未检测到 Tauri 接口（window.__TAURI__）。请通过应用本身运行，而不是在普通浏览器里打开 dist/index.html。";
+  throw new Error("Tauri bridge unavailable");
+}
+const invoke = bridge;
 const ui = {
   bind: el("bind"),
   toggle: el("toggle"),
